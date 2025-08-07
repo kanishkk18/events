@@ -1,9 +1,9 @@
 'use client'
 
-import { useSession, signOut } from 'next-auth/react'
+import { useAuth } from '../lib/auth-context'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { useRouter } from 'next/router'
+import { Button } from '../components/ui/button'
 import { 
   Calendar, 
   Users, 
@@ -23,11 +23,11 @@ const navigation = [
 ]
 
 export function Navigation() {
-  const { data: session } = useSession()
-  const pathname = usePathname()
+  const { user, logout } = useAuth()
+  const router = useRouter()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  if (!session) return null
+  if (!user) return null
 
   return (
     <>
@@ -40,7 +40,7 @@ export function Navigation() {
           <div className="mt-5 flex-grow flex flex-col">
             <nav className="flex-1 px-2 space-y-1">
               {navigation.map((item) => {
-                const isActive = pathname === item.href
+                const isActive = router.pathname === item.href
                 return (
                   <Link
                     key={item.name}
@@ -64,21 +64,21 @@ export function Navigation() {
           </div>
           <div className="flex-shrink-0 flex border-t border-gray-200 p-4">
             <div className="flex items-center">
-              {session.user?.image && (
+              {user.imageUrl && (
                 <img
                   className="inline-block h-9 w-9 rounded-full"
-                  src={session.user.image}
+                  src={user.imageUrl}
                   alt=""
                 />
               )}
               <div className="ml-3">
                 <p className="text-sm font-medium text-gray-700 group-hover:text-gray-900">
-                  {session.user?.name}
+                  {user.name}
                 </p>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => signOut()}
+                  onClick={logout}
                   className="text-xs text-gray-500 hover:text-gray-700 p-0 h-auto"
                 >
                   <LogOut className="w-3 h-3 mr-1" />
@@ -107,7 +107,7 @@ export function Navigation() {
           <div className="bg-white border-b border-gray-200">
             <div className="px-2 pt-2 pb-3 space-y-1">
               {navigation.map((item) => {
-                const isActive = pathname === item.href
+                const isActive = router.pathname === item.href
                 return (
                   <Link
                     key={item.name}
@@ -131,26 +131,26 @@ export function Navigation() {
             </div>
             <div className="pt-4 pb-3 border-t border-gray-200">
               <div className="flex items-center px-4">
-                {session.user?.image && (
+                {user.imageUrl && (
                   <img
                     className="h-10 w-10 rounded-full"
-                    src={session.user.image}
+                    src={user.imageUrl}
                     alt=""
                   />
                 )}
                 <div className="ml-3">
                   <div className="text-base font-medium text-gray-800">
-                    {session.user?.name}
+                    {user.name}
                   </div>
                   <div className="text-sm font-medium text-gray-500">
-                    {session.user?.email}
+                    {user.email}
                   </div>
                 </div>
               </div>
               <div className="mt-3 px-2">
                 <Button
                   variant="ghost"
-                  onClick={() => signOut()}
+                  onClick={logout}
                   className="w-full justify-start"
                 >
                   <LogOut className="w-4 h-4 mr-2" />

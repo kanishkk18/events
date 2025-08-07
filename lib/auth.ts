@@ -1,136 +1,63 @@
-import { NextAuthOptions } from 'next-auth'
-import GoogleProvider from 'next-auth/providers/google'
-import { PrismaAdapter } from '@next-auth/prisma-adapter'
-import { prisma } from './prisma'
-import { v4 as uuidv4 } from 'uuid'
-import { DayOfWeek } from '@prisma/client'
+import { compare, hash } from 'bcryptjs';
+import env from './env';
+import type { AUTH_PROVIDER } from '../types';
+import jwt from 'jsonwebtoken'
+import bcrypt from 'bcryptjs'
+import { config } from './config'
 
-async function generateUsername(name: string): Promise<string> {
-  const cleanName = name.replace(/\s+/g, "").toLowerCase()
-  const baseUsername = cleanName
-  const uuidSuffix = uuidv4().replace(/\s+/g, "").slice(0, 4)
-  let username = `${baseUsername}${uuidSuffix}`
-  
-  let existingUser = await prisma.user.findUnique({
-    where: { username },
-  })
-
-  while (existingUser) {
-    username = `${baseUsername}${uuidv4().replace(/\s+/g, "").slice(0, 4)}`
-    existingUser = await prisma.user.findUnique({ where: { username } })
-  }
-
-  return username
+export async function hashPassword(password: string) {
+  return await hash(password, 12);
 }
 
-export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
-  providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
-  ],
-  events: {
-    async createUser({ user }) {
-      try {
-        const username = await generateUsername(user.name || user.email!.split('@')[0])
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            username,
-            availability: {
-              create: {
-                timeGap: 30,
-                days: {
-                  create: Object.values(DayOfWeek).map((day) => ({
-                    day,
-                    startTime: new Date(`2025-03-01T09:00:00Z`),
-                    endTime: new Date(`2025-03-01T17:00:00Z`),
-                    isAvailable: day !== DayOfWeek.SUNDAY && day !== DayOfWeek.SATURDAY,
-                  })),
-                },
-              },
-            },
-          },
-        })
-      } catch (error) {
-        console.error('Error in createUser event:', error)
-        throw error
-      }
-    },
-  },
-  callbacks: {
-    async signIn({ user, account }) {
-      if (account?.provider === 'google') {
-        try {
-          const existingUser = await prisma.user.findUnique({
-            where: { email: user.email! },
-          })
+export async function verifyPassword(password: string, hashedPassword: string) {
+  return await compare(password, hashedPassword);
+}
 
-          if (existingUser) {
-            // Check if Google account is linked
-            const existingAccount = await prisma.account.findFirst({
-              where: {
-                userId: existingUser.id,
-                provider: account.provider,
-                providerAccountId: account.providerAccountId,
-              },
-            })
+function getAuthProviders() {
+  return env.authProviders?.split(',') || [];
+}
 
-            // Link account if not already linked
-            if (!existingAccount) {
-              await prisma.account.create({
-                data: {
-                  userId: existingUser.id,
-                  type: account.type,
-                  provider: account.provider,
-                  providerAccountId: account.providerAccountId,
-                  refresh_token: account.refresh_token,
-                  access_token: account.access_token,
-                  expires_at: account.expires_at,
-                  token_type: account.token_type,
-                  scope: account.scope,
-                  id_token: account.id_token,
-                  session_state: account.session_state,
-                },
-              })
-            }
+export function isAuthProviderEnabled(provider: AUTH_PROVIDER) {
+  return getAuthProviders().includes(provider);
+}
 
-            // Update username if missing
-            if (!existingUser.username) {
-              const username = await generateUsername(existingUser.name || existingUser.email.split('@')[0])
-              await prisma.user.update({
-                where: { id: existingUser.id },
-                data: { username },
-              })
-            }
-          }
-        } catch (error) {
-          console.error('Error in signIn callback:', error)
-          return false
-        }
-      }
-      return true
-    },
-    async session({ session, user }) {
-      if (session.user) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: session.user.email! },
-        })
-        
-        if (dbUser) {
-          session.user.id = dbUser.id
-          session.user.username = dbUser.username
-        }
-      }
-      return session
-    },
-  },
-  pages: {
-    signIn: '/auth/signin',
-  },
-  session: {
-    strategy: 'database',
-  },
+export function authProviderEnabled() {
+  return {
+    github: isAuthProviderEnabled('github'),
+    google: isAuthProviderEnabled('google'),
+    email: isAuthProviderEnabled('email'),
+    saml: isAuthProviderEnabled('saml'),
+    credentials: isAuthProviderEnabled('credentials'),
+  };
+}
+
+export type AccessTokenPayload = {
+  userId: string
+}
+
+export const hashValue = async (value: string, saltRounds: number = 10) =>
+  await bcrypt.hash(value, saltRounds)
+
+export const compareValue = async (value: string, hashedValue: string) =>
+  await bcrypt.compare(value, hashedValue)
+
+export const signJwtToken = (payload: AccessTokenPayload) => {
+  const token = jwt.sign(payload, config.JWT_SECRET, {
+    expiresIn: config.JWT_EXPIRES_IN,
+    audience: ["user"],
+  })
+
+  const decodedToken = jwt.decode(token) as jwt.JwtPayload | null
+  const expiresAt = decodedToken?.exp ? decodedToken.exp * 1000 : null
+
+  return {
+    token,
+    expiresAt,
+  }
+}
+
+export const verifyJwtToken = (token: string): AccessTokenPayload => {
+  return jwt.verify(token, config.JWT_SECRET, {
+    audience: ["user"],
+  }) as AccessTokenPayload 
 }
